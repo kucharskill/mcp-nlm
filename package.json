@@ -1,0 +1,11 @@
+{
+  "name": "mcp-nlm",
+  "version": "0.1.0",
+  "description": "On-demand stdio proxy for the latest NotebookLM MCP server.",
+  "type": "module",
+  "bin": { "mcp-nlm": "cli.js" },
+  "files": ["cli.js", "proxy.js", "README.md"],
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test", "check": "node --check cli.js && node --check proxy.js && node --test" },
+  "private": true
+}
