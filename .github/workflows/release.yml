@@ -1,0 +1,43 @@
+name: Release
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          python-version: '3.12'
+      - name: Verify version and tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) process.exit(1)'
+      - run: npm ci --ignore-scripts
+      - run: npm run release:prepare
+      - name: Verify distribution
+        shell: bash
+        run: |
+          wheel="$(pwd)/tmp/releases/$(ls tmp/releases | sed -n '/\.whl$/p')"
+          uvx --from "$wheel" mcp-nlm --version
+          node scripts/smoke.mjs uvx --from "$wheel" mcp-nlm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: python-distributions
+          path: tmp/releases/*
+      - name: Publish to PyPI using OIDC
+        run: uv publish --trusted-publishing always tmp/releases/*

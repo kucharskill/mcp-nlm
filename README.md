@@ -1,6 +1,28 @@
 # mcp-nlm
 
-A small Node.js stdio proxy for `notebooklm-mcp-cli`. Requires Node.js 22+ and `uvx` on PATH.
+A small stdio proxy for [`notebooklm-mcp-cli`](https://github.com/jacob-bd/gemini-notebook-mcp-cli).
+Requires Node.js 22+, Python 3.10+ (managed by uv), and `uvx` on PATH.
+The Python entry point launches the bundled Node.js proxy without Python dependencies.
+
+```sh
+uvx mcp-nlm@latest
+uvx mcp-nlm@latest --version
+```
+
+MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "notebooklm": {
+      "command": "uvx",
+      "args": ["mcp-nlm@latest"]
+    }
+  }
+}
+```
+
+To run directly from a checkout:
 
 ```sh
 node cli.js
@@ -37,10 +59,21 @@ uvx --from notebooklm-mcp-cli@latest nlm login --storage file
 ```
 
 Set `NOTEBOOKLM_MCP_CLI_PATH` to the data directory above before running login.
+Set the same variable for the MCP client if you choose a different directory.
+Check login with `nlm login --check` or explicitly refresh with `nlm auth refresh`,
+using the same `uvx --from notebooklm-mcp-cli@latest` prefix and data directory.
 Data in the OS temporary directory can be removed by system cleanup.
+
+NotebookLM access uses an unofficial upstream integration and your Google account.
+Account features, quotas and any subscription charges are controlled by Google.
+This proxy adds no API service or per-request fee.
 
 Upstream process state (such as in-memory jobs) does not survive idle shutdown.
 Capabilities and tool schemas belong to upstream and can change after an update;
 reconnect the MCP client if an update changes its advertised capabilities.
 
 Development: `npm run check`. Disposable experiments belong in the ignored `tmp/` directory.
+Build and verify wheel and source archive: `npm run release:prepare`.
+GitHub Releases publish to PyPI through Trusted Publishing (OIDC).
+
+License: [MIT](LICENSE).

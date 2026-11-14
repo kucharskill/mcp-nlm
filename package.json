@@ -3,9 +3,17 @@
   "version": "0.1.0",
   "description": "On-demand stdio proxy for the latest NotebookLM MCP server.",
   "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/kucharskill/mcp-nlm.git" },
+  "homepage": "https://github.com/kucharskill/mcp-nlm#readme",
+  "bugs": { "url": "https://github.com/kucharskill/mcp-nlm/issues" },
   "bin": { "mcp-nlm": "cli.js" },
-  "files": ["cli.js", "proxy.js", "README.md"],
+  "files": ["cli.js", "proxy.js", "README.md", "LICENSE"],
   "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test", "check": "node --check cli.js && node --check proxy.js && node --test" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check cli.js && node --check proxy.js && node --test",
+    "release:prepare": "npm run check && uv build --no-sources --out-dir tmp/releases && uv run --no-project scripts/check_dist.py tmp/releases"
+  },
   "private": true
 }

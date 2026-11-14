@@ -2,7 +2,23 @@
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { StdioProxy } from './proxy.js';
+
+const args = process.argv.slice(2);
+if (args.length) {
+  if (args.length === 1 && ['--version', '-v'].includes(args[0])) {
+    const metadata = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
+    console.log(metadata.version);
+    process.exit(0);
+  }
+  if (args.length === 1 && ['--help', '-h'].includes(args[0])) {
+    console.log('Usage: mcp-nlm [--help | --version]\n\nStart the on-demand NotebookLM stdio MCP proxy (default).\nRequires Node.js 22+ and uvx on PATH.');
+    process.exit(0);
+  }
+  console.error('Unknown argument. Run mcp-nlm --help.');
+  process.exit(2);
+}
 
 const cwd = join(tmpdir(), 'uvx', 'nlm');
 const data = process.env.NOTEBOOKLM_MCP_CLI_PATH || join(cwd, 'data');
