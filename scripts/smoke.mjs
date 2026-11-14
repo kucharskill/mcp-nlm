@@ -8,8 +8,12 @@ import assert from 'node:assert/strict';
 const args = process.argv.slice(2);
 const readNotebooks = args[0] === '--notebooks';
 if (readNotebooks) args.shift();
-const command = args.shift();
+let command = args.shift();
 if (!command) throw new Error('Usage: node scripts/smoke.mjs [--notebooks] <command> [args...]');
+if (process.platform === 'win32' && command === 'npx') {
+  args.unshift(join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js'));
+  command = process.execPath;
+}
 const cwd = await mkdtemp(join(tmpdir(), 'mcp-nlm-smoke-'));
 const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
 const pending = new Map();

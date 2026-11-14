@@ -26,7 +26,7 @@ jobs:
       - name: Verify packed CLI and MCP outside checkout
         shell: bash
         run: |
-          wheel="$(pwd)/tmp/releases/$(ls tmp/releases | sed -n '/\.whl$/p')"
-          uvx --from "$wheel" mcp-nlm --version
-          uvx --from "$wheel" mcp-nlm --help
-          node scripts/smoke.mjs uvx --from "$wheel" mcp-nlm
+          archive="$(pwd)/tmp/releases/mcp-nlm-$(node -p 'require("./package.json").version').tgz"
+          npx -y --package "$archive" -- mcp-nlm --version
+          npx -y --package "$archive" -- mcp-nlm --help
+          node scripts/smoke.mjs npx -y --package "$archive" -- mcp-nlm

@@ -9,7 +9,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
@@ -19,7 +18,7 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
+          node-version: '24'
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           python-version: '3.12'
@@ -32,12 +31,16 @@ jobs:
       - name: Verify distribution
         shell: bash
         run: |
-          wheel="$(pwd)/tmp/releases/$(ls tmp/releases | sed -n '/\.whl$/p')"
-          uvx --from "$wheel" mcp-nlm --version
-          node scripts/smoke.mjs uvx --from "$wheel" mcp-nlm
+          archive="$(pwd)/tmp/releases/mcp-nlm-$(node -p 'require("./package.json").version').tgz"
+          npx -y --package "$archive" -- mcp-nlm --version
+          node scripts/smoke.mjs npx -y --package "$archive" -- mcp-nlm
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: python-distributions
-          path: tmp/releases/*
-      - name: Publish to PyPI using OIDC
-        run: uv publish --trusted-publishing always tmp/releases/*
+          name: npm-distribution
+          path: |
+            tmp/releases/*.tgz
+            tmp/releases/package-manifest.json
+      - name: Publish to npm using OIDC
+        env:
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: npm run release:publish

@@ -1,12 +1,12 @@
 # mcp-nlm
 
 A small stdio proxy for [`notebooklm-mcp-cli`](https://github.com/jacob-bd/gemini-notebook-mcp-cli).
-Requires Node.js 22+, Python 3.10+ (managed by uv), and `uvx` on PATH.
-The Python entry point launches the bundled Node.js proxy without Python dependencies.
+Requires Node.js 22+ and `uvx` on PATH. The proxy is distributed through npm;
+uvx runs only the upstream NotebookLM server.
 
 ```sh
-uvx mcp-nlm@latest
-uvx mcp-nlm@latest --version
+npx -y --prefer-online mcp-nlm@latest
+npx -y --prefer-online mcp-nlm@latest --version
 ```
 
 MCP client configuration:
@@ -15,8 +15,8 @@ MCP client configuration:
 {
   "mcpServers": {
     "notebooklm": {
-      "command": "uvx",
-      "args": ["mcp-nlm@latest"]
+      "command": "npx",
+      "args": ["-y", "--prefer-online", "mcp-nlm@latest"]
     }
   }
 }
@@ -73,7 +73,7 @@ Capabilities and tool schemas belong to upstream and can change after an update;
 reconnect the MCP client if an update changes its advertised capabilities.
 
 Development: `npm run check`. Disposable experiments belong in the ignored `tmp/` directory.
-Build and verify wheel and source archive: `npm run release:prepare`.
-GitHub Releases publish to PyPI through Trusted Publishing (OIDC).
+Build and verify the npm archive: `npm run release:prepare`.
+GitHub Releases publish to npm through Trusted Publishing (OIDC).
 
 License: [MIT](LICENSE).
