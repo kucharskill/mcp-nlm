@@ -16,6 +16,15 @@ one minute; all other requests select thirty minutes. The latest request wins.
 The timer starts after outstanding requests finish. Notifications do not extend it.
 Closing the client connection closes the upstream process.
 
+One exception to response transparency is authentication recovery. When a tool
+returns an explicit authentication error, the proxy calls upstream `refresh_auth`
+once (concurrent failures for the same profile share the attempt). It preserves
+the original result and appends a text block reporting whether refresh succeeded.
+It never retries the original operation, changes the active profile, or starts an
+interactive login. Explicit client calls to `refresh_auth` pass through unchanged.
+Refresh has a sixty-second response timeout; expiry does not cancel upstream's
+ongoing recovery. Upstream may launch its managed browser in the background.
+
 Working directory: `<OS temp>/uvx/nlm`. NotebookLM data and browser profiles:
 `<OS temp>/uvx/nlm/data`, overridable with `NOTEBOOKLM_MCP_CLI_PATH`.
 The uv cache retains its existing configuration. Browser detection stays upstream's default.

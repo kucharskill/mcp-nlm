@@ -7,11 +7,28 @@ const fixture = `
 import { createInterface } from 'node:readline';
 const send = m => process.stdout.write(JSON.stringify(m) + '\\n');
 let ready = false;
+let refreshCount = 0;
+let operationCount = 0;
 createInterface({input: process.stdin}).on('line', line => {
  const m = JSON.parse(line);
  if(m.method === 'notifications/initialized') { ready = true; return; }
  if(m.method === 'initialize') { send({jsonrpc:'2.0', id:m.id, result:{protocolVersion:m.params.protocolVersion, capabilities:{tools:{}}, serverInfo:{name:'fixture',version:'1'}}}); return; }
  if(m.method === 'crash') { process.exit(7); }
+ if(m.method === 'tools/call' && m.params.name === 'refresh_auth') {
+   refreshCount++;
+   const profile = m.params.arguments?.profile;
+   if(profile === 'timeout') return;
+   if(profile === 'late') { setTimeout(() => send({jsonrpc:'2.0',id:m.id,result:{structuredContent:{status:'success'}}}),200); return; }
+   if(profile === 'crash') process.exit(7);
+   setTimeout(() => send({jsonrpc:'2.0',id:m.id,result:{content:[],structuredContent:{status:profile === 'fail' ? 'error' : 'success'}}}),30);
+   return;
+ }
+ if(m.method === 'tools/call' && ['expired','ordinary-error','success-with-auth-text'].includes(m.params.name)) {
+   operationCount++;
+   const name = m.params.name;
+   send({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:name === 'ordinary-error' ? 'Invalid notebook id' : 'Authentication expired. Run nlm login'}],isError:name !== 'success-with-auth-text',_meta:{operationCount,refreshCount}}});
+   return;
+ }
  if(!m.method) { send({jsonrpc:'2.0',method:'notifications/fixture',params:m}); return; }
  if(m.method === 'server-request') { send({jsonrpc:'2.0',id:'server-1',method:'sampling/createMessage',params:{sample:true}}); }
  const reply = () => send({jsonrpc:'2.0',id:m.id,result:{ready,pid:process.pid,method:m.method,params:m.params}});
@@ -27,7 +44,7 @@ async function waitFor(predicate, timeout = 5000) {
   }
 }
 
-function setup(t) {
+function setup(t, options = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const messages = [];
@@ -39,7 +56,7 @@ function setup(t) {
       messages.push(JSON.parse(buffer.slice(0, n))); buffer = buffer.slice(n + 1);
     }
   });
-  const proxy = new StdioProxy({ command: process.execPath, args: ['--input-type=module', '-e', fixture], discoveryMs: 80, idleMs: 400 });
+  const proxy = new StdioProxy({ command: process.execPath, args: ['--input-type=module', '-e', fixture], discoveryMs: 80, idleMs: 400, ...options });
   proxy.connect(input, output);
   t.after(() => proxy.close());
   const send = m => input.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
@@ -107,4 +124,59 @@ test('closing client input stops upstream', async t => {
   await s.initialize();
   s.input.end();
   await waitFor(() => s.proxy.closed && !s.proxy.child);
+});
+
+test('auth recovery shares one refresh, preserves original errors, and never retries operations', async t => {
+  const s = setup(t);
+  await s.initialize();
+  const [first, second] = await Promise.all([
+    s.call(2, 'tools/call', { name: 'expired', arguments: {} }),
+    s.call(3, 'tools/call', { name: 'expired', arguments: {} }),
+  ]);
+  assert.equal(first.result.isError, true);
+  assert.equal(first.result.content[0].text, 'Authentication expired. Run nlm login');
+  assert.match(first.result.content[1].text, /refreshed successfully/);
+  assert.match(second.result.content[1].text, /not retried/);
+  const probe = await s.call(4, 'tools/call', { name: 'ordinary-error', arguments: {} });
+  assert.deepEqual(probe.result._meta, { operationCount: 3, refreshCount: 1 });
+});
+
+test('ordinary errors and successful content mentioning auth pass through unchanged', async t => {
+  const s = setup(t);
+  await s.initialize();
+  for (const [id, name] of [[2, 'ordinary-error'], [3, 'success-with-auth-text']]) {
+    const response = await s.call(id, 'tools/call', { name, arguments: {} });
+    assert.equal(response.result.content.length, 1);
+    assert.equal(response.result._meta.refreshCount, 0);
+  }
+});
+
+test('explicit refresh is not intercepted; failed recovery passes profile and returns guidance', async t => {
+  const s = setup(t);
+  await s.initialize();
+  const explicit = await s.call(2, 'tools/call', { name: 'refresh_auth', arguments: { profile: 'fail' } });
+  assert.equal(explicit.result.structuredContent.status, 'error');
+  assert.equal(explicit.result.content.length, 0);
+  const failure = await s.call(3, 'tools/call', { name: 'expired', arguments: { profile: 'fail' } });
+  assert.match(failure.result.content[1].text, /failed or timed out/);
+});
+
+test('recovery timeout and process crash both release original request', async t => {
+  const s = setup(t, { startupMs: 100 });
+  await s.initialize();
+  const timeout = await s.call(2, 'tools/call', { name: 'expired', arguments: { profile: 'timeout' } });
+  assert.match(timeout.result.content[1].text, /timed out/);
+  const crash = await s.call(3, 'tools/call', { name: 'expired', arguments: { profile: 'crash' } });
+  assert.equal(crash.error.code, -32603);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(s.messages.filter(m => m.id === 3).length, 1);
+});
+
+test('late internal refresh responses never leak to client', async t => {
+  const s = setup(t, { startupMs: 50 });
+  await s.initialize();
+  await s.call(2, 'tools/call', { name: 'expired', arguments: { profile: 'late' } });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(s.messages.some(m => typeof m.id === 'string' && m.id.startsWith('proxy-refresh-')), false);
+  assert.equal(s.messages.filter(m => m.id === 2).length, 1);
 });

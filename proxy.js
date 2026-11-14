@@ -5,10 +5,24 @@ import { randomUUID } from 'node:crypto';
 const discovery = new Set(['initialize', 'tools/list']);
 const key = id => JSON.stringify(id);
 
+function authFailure(result) {
+  let data = result?.structuredContent;
+  if (!data) {
+    try { data = JSON.parse(result?.content?.find(item => item.type === 'text')?.text); } catch {}
+  }
+  if (!result?.isError && data?.status !== 'error') return false;
+  const error = typeof data?.error === 'string' ? data.error
+    : result?.isError ? result.content?.filter(item => item.type === 'text').map(item => item.text).join('\n') : '';
+  return /authentication|unauthenticated|credentials? (?:have |has )?expired|no auth(?:entication)? found|run ['"`]?nlm login/i.test(error || '');
+}
+
 export class StdioProxy {
   constructor({ command, args = [], cwd, env = process.env, discoveryMs = 60_000, idleMs = 1_800_000, startupMs = 60_000 }) {
     Object.assign(this, { command, args, cwd, env, discoveryMs, idleMs, startupMs });
     this.pending = new Set();
+    this.requests = new Map();
+    this.refreshes = new Map();
+    this.internalIds = new Set();
     this.serverPending = new Set();
     this.delay = discoveryMs;
     this.queue = Promise.resolve();
@@ -51,7 +65,10 @@ export class StdioProxy {
     try {
       await this.ensureStarted(message.method === 'initialize');
       if (this.closed) return;
-      if (request) this.pending.add(key(message.id));
+      if (request) {
+        this.pending.add(key(message.id));
+        this.requests.set(key(message.id), message);
+      }
       else if (Object.hasOwn(message, 'id')) this.serverPending.delete(key(message.id));
       this.write(message);
     } catch (error) {
@@ -92,6 +109,11 @@ export class StdioProxy {
   }
 
   upstream(message) {
+    if (!message.method && this.internalIds.has(key(message.id))) {
+      this.internalIds.delete(key(message.id));
+      this.refreshes.get(key(message.id))?.(message);
+      return;
+    }
     if (this.bootstrap && message.id === this.bootstrap.id && !message.method) {
       const { resolve, reject, timer } = this.bootstrap;
       clearTimeout(timer);
@@ -99,11 +121,57 @@ export class StdioProxy {
       if (message.error) reject(new Error(message.error.message)); else resolve();
       return;
     }
+    const request = this.requests.get(key(message.id));
+    if (!message.method && request?.method === 'tools/call'
+        && request.params?.name !== 'refresh_auth' && authFailure(message.result)) {
+      void this.recover(message, request);
+      return;
+    }
     if (Object.hasOwn(message, 'id')) {
       if (message.method) this.serverPending.add(key(message.id));
-      else this.pending.delete(key(message.id));
+      else { this.pending.delete(key(message.id)); this.requests.delete(key(message.id)); }
     }
     this.emit(message);
+    this.arm();
+  }
+
+  async recover(message, request) {
+    const profile = request.params?.arguments?.profile;
+    const group = typeof profile === 'string' ? profile : '';
+    this.recoveries ??= new Map();
+    if (!this.recoveries.has(group)) {
+      const refresh = new Promise(resolve => {
+        const id = `proxy-refresh-${randomUUID()}`;
+        const finish = response => {
+          clearTimeout(timer);
+          this.refreshes.delete(key(id));
+          resolve(response);
+        };
+        const timer = setTimeout(() => finish(null), this.startupMs);
+        this.refreshes.set(key(id), finish);
+        this.internalIds.add(key(id));
+        try {
+          this.write({ jsonrpc: '2.0', id, method: 'tools/call', params: {
+            name: 'refresh_auth', arguments: group ? { profile: group } : {},
+          } });
+        } catch { finish(null); }
+      }).finally(() => this.recoveries.delete(group));
+      this.recoveries.set(group, refresh);
+    }
+    const response = await this.recoveries.get(group);
+    // A process failure already answered all outstanding client requests.
+    if (!this.pending.has(key(message.id)) || this.closed) return;
+    let data = response?.result?.structuredContent;
+    if (!data) {
+      try { data = JSON.parse(response?.result?.content?.find(item => item.type === 'text')?.text); } catch {}
+    }
+    const recovered = !response?.error && !response?.result?.isError && data?.status === 'success';
+    const text = recovered
+      ? 'Proxy: authentication was refreshed successfully. The original operation was not retried. Retry it if still needed; interactive login is not required.'
+      : 'Proxy: one authentication refresh attempt failed or timed out. The original operation was not retried. Interactive nlm login may be required.';
+    this.emit({ ...message, result: { ...message.result, content: [...(message.result.content || []), { type: 'text', text }] } });
+    this.pending.delete(key(message.id));
+    this.requests.delete(key(message.id));
     this.arm();
   }
 
@@ -118,6 +186,9 @@ export class StdioProxy {
     }
     for (const id of this.pending) this.emit({ jsonrpc: '2.0', id: JSON.parse(id), error: { code: -32603, message: reason } });
     this.pending.clear();
+    this.requests.clear();
+    for (const finish of this.refreshes.values()) finish(null);
+    this.internalIds.clear();
     this.serverPending.clear();
   }
 
