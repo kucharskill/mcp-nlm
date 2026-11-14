@@ -1,20 +1,36 @@
 {
   "name": "mcp-nlm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "On-demand stdio proxy for the latest NotebookLM MCP server.",
   "type": "module",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/kucharskill/mcp-nlm.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kucharskill/mcp-nlm.git"
+  },
   "homepage": "https://github.com/kucharskill/mcp-nlm#readme",
-  "bugs": { "url": "https://github.com/kucharskill/mcp-nlm/issues" },
-  "bin": { "mcp-nlm": "cli.js" },
-  "files": ["cli.js", "proxy.js", "README.md", "LICENSE"],
-  "engines": { "node": ">=22" },
+  "bugs": {
+    "url": "https://github.com/kucharskill/mcp-nlm/issues"
+  },
+  "bin": {
+    "mcp-nlm": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "proxy.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test",
     "check": "node --check cli.js && node --check proxy.js && node --test",
     "release:prepare": "npm run check && node scripts/prepare-release.mjs",
     "release:publish": "node scripts/publish-release.mjs"
   },
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }
