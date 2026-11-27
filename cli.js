@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { StdioProxy } from './proxy.js';
+import { appendStartupEnv } from './startup-env.js';
 
 const args = process.argv.slice(2);
 if (args.length) {
@@ -21,6 +22,7 @@ if (args.length) {
 }
 
 const cwd = join(tmpdir(), 'uvx', 'nlm');
+await appendStartupEnv(join(cwd, 'discovery'));
 const data = process.env.NOTEBOOKLM_MCP_CLI_PATH || join(cwd, 'data');
 await mkdir(data, { recursive: true });
 const proxy = new StdioProxy({

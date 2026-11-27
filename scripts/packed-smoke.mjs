@@ -15,7 +15,7 @@ const directory = await mkdtemp(join(base, 'packed-'));
 const children = [];
 try {
   await mkdir(join(directory, 'package'));
-  const allowed = new Set(['LICENSE', 'README.md', 'cli.js', 'proxy.js', 'discovery-cache.js', 'package.json']);
+  const allowed = new Set(['LICENSE', 'README.md', 'cli.js', 'proxy.js', 'discovery-cache.js', 'startup-env.js', 'package.json']);
   for (let offset = 0; offset + 512 <= tar.length && tar[offset];) {
     const header = tar.subarray(offset, offset + 512);
     const field = (start, length) => header.subarray(start, start + length).toString().replace(/\0.*$/s, '');

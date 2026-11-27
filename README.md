@@ -78,6 +78,14 @@ protocol and capabilities; otherwise the call fails with a reconnect instruction
 without running or retrying the original operation. An unobserved upstream update
 can remain invisible until the cache expires or real work starts upstream.
 
+At MCP wrapper startup only, the original environment is appended as one
+`{pid, startedAt, env}` record to `<OS temp>/uvx/nlm/discovery/env-startup.jsonl`.
+This local diagnostic file contains raw environment values, which can include
+credentials. It is never bundled, printed, or sent to upstream as diagnostic data.
+The append is best-effort, uses restrictive permissions where supported, and does
+not run for individual requests or backend restarts. Version/help commands do not
+write a startup record. Remove the local file when it is no longer needed.
+
 One exception to response transparency is authentication recovery. When a tool
 returns an explicit authentication error, the proxy calls upstream `refresh_auth`
 once (concurrent failures for the same profile share the attempt). It preserves

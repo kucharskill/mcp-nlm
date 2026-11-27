@@ -27,7 +27,7 @@ for (let offset = 0; offset + 512 <= tar.length && tar[offset];) {
   files.push(name);
   offset += 512 + Math.ceil(size / 512) * 512;
 }
-assert.deepEqual(files.sort(), ['package/LICENSE', 'package/README.md', 'package/cli.js', 'package/discovery-cache.js', 'package/package.json', 'package/proxy.js'].sort());
+assert.deepEqual(files.sort(), ['package/LICENSE', 'package/README.md', 'package/cli.js', 'package/discovery-cache.js', 'package/startup-env.js', 'package/package.json', 'package/proxy.js'].sort());
 const integrity = 'sha512-' + createHash('sha512').update(archive).digest('base64');
 assert.equal(integrity, report.integrity);
 const manifest = { name: metadata.name, version: metadata.version, archive: report.filename, integrity, files };
