@@ -13,7 +13,7 @@ test('startup env appends one JSONL record per invocation and fails open', async
     assert.equal(dirname(directory), base);
     await rm(directory, { recursive: true, force: true });
   });
-  const env = { CODEX_TOOL_CALL_ID: 'first-replica', SYNTHETIC_TOKEN: 'fixture-only-value' };
+  const env = { CODEX_TOOL_CALL_ID: 'first-replica', SYNTHETIC_TOKEN: 'fixture-only-value', PATH: 'original-path', INIT_CWD: 'original-cwd', npm_package_json: 'original-package' };
   await appendStartupEnv(directory, env);
   env.CODEX_TOOL_CALL_ID = 'second-replica';
   await appendStartupEnv(directory, env);
@@ -25,6 +25,9 @@ test('startup env appends one JSONL record per invocation and fails open', async
     assert.equal(record.pid, process.pid);
     assert.ok(Number.isFinite(Date.parse(record.startedAt)));
     assert.equal(record.env.SYNTHETIC_TOKEN, 'fixture-only-value');
+    assert.equal(record.env.PATH, env.PATH);
+    assert.equal(record.env.INIT_CWD, env.INIT_CWD);
+    assert.equal(record.env.npm_package_json, env.npm_package_json);
   }
   assert.equal(records[0].env.CODEX_TOOL_CALL_ID, 'first-replica');
   assert.equal(records[1].env.CODEX_TOOL_CALL_ID, 'second-replica');

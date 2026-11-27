@@ -93,12 +93,12 @@ test('legacy ping is local, modern ping is rejected, and neither launches upstre
 
 test('cold discovery persists complete metadata; a second process initializes and lists without upstream', async t => {
   const s = await scenario(t);
-  const first = s.client({}, { CODEX_TOOL_CALL_ID: 'first', CACHE_TEST_SECRET: 'synthetic-secret-never-persist' });
+  const first = s.client({}, { CODEX_TOOL_CALL_ID: 'first', CACHE_TEST_SECRET: 'synthetic-secret-never-persist', PATH: 'first-path', INIT_CWD: 'first-cwd', npm_config_local_prefix: 'first-prefix', npm_package_json: 'first-package', NPM_OTHER: 'first-other' });
   const init = await first.initialize();
   const list = await first.call('tools/list');
   for (const method of ['prompts/list', 'resources/list', 'resources/templates/list']) assert.ok((await first.call(method)).result);
   await first.close();
-  const second = s.client({}, { CODEX_TOOL_CALL_ID: 'second', CACHE_TEST_SECRET: 'synthetic-secret-never-persist' });
+  const second = s.client({}, { CODEX_TOOL_CALL_ID: 'second', CACHE_TEST_SECRET: 'synthetic-secret-never-persist', PATH: 'second-path', INIT_CWD: 'second-cwd', npm_config_local_prefix: 'second-prefix', npm_package_json: 'second-package', NPM_OTHER: 'second-other' });
   assert.deepEqual((await second.initialize()).result.capabilities, init.result.capabilities);
   assert.deepEqual((await second.call('tools/list')).result, list.result);
   for (const method of ['prompts/list', 'resources/list', 'resources/templates/list']) await second.call(method);
@@ -112,6 +112,7 @@ test('cold discovery persists complete metadata; a second process initializes an
   assert.equal(list.result.tools[0]._meta.vendor.tags[0], 'fixture');
   const operation = await second.call('tools/call', { name: 'read', arguments: { value: 'untouched' } });
   assert.equal(operation.result.structuredContent.ephemeralEnv, 'second');
+  assert.deepEqual(operation.result.structuredContent.launchEnv, { PATH: 'second-path', INIT_CWD: 'second-cwd', npm_config_local_prefix: 'second-prefix', npm_package_json: 'second-package', NPM_OTHER: 'second-other' });
   assert.equal(operation.result.structuredContent.params.arguments.value, 'untouched');
   assert.equal((await s.events()).filter(event => event.method === 'spawn').length, 2);
   assert.equal(JSON.stringify(await s.document()).includes('fixture result'), false);
@@ -123,6 +124,23 @@ test('cache keys cover args, cwd, all env and canonical Windows exclusions', () 
   for (const change of [{ args: ['different'] }, { cwd: join(root, '.tmp') }, { env: { ...base.env, A: '2' } }, { env: { ...base.env, EXTRA: 'yes' } }]) assert.notEqual(targetKey(base), targetKey({ ...base, ...change }));
   assert.equal(targetKey({ ...base, excludeEnv: ['secret'] }), targetKey({ ...base, excludeEnv: ['SECRET'], env: { ...base.env, Secret: 'changed' } }));
   assert.notEqual(targetKey({ ...base, args: ['a,b', 'c'] }), targetKey({ ...base, args: ['a', 'b,c'] }));
+});
+
+test('PATH, INIT_ and NPM_ are excluded case-insensitively from keys only', () => {
+  for (const platform of ['win32', 'linux']) {
+    const base = { command: 'uvx', args: ['--from', 'package@latest'], cwd: root, platform, env: { NOTEBOOKLM_MCP_CLI_PATH: 'data', CUSTOM_IGNORED: 'one' }, excludeEnv: ['CUSTOM_IGNORED'] };
+    const expected = targetKey(base);
+    for (const name of ['PATH', 'Path', 'pAtH', 'INIT_CWD', 'init_cwd', 'InIt_CUSTOM', 'npm_config_local_prefix', 'npm_package_json', 'NPM_OTHER', 'NpM_Mixed']) {
+      const input = { ...base, env: { ...base.env, [name]: 'one' } };
+      const before = structuredClone(input.env);
+      assert.equal(targetKey(input), expected, `${platform}: ${name}`);
+      assert.equal(targetKey({ ...input, env: { ...input.env, [name]: 'two', CUSTOM_IGNORED: 'two' } }), expected);
+      assert.deepEqual(input.env, before);
+    }
+    for (const name of ['NOTEBOOKLM_MCP_CLI_PATH', 'PATH_EXTRA', 'INITIAL_VALUE', 'NPMVALUE', 'OTHER']) {
+      assert.notEqual(targetKey({ ...base, env: { ...base.env, [name]: 'changed' } }), expected);
+    }
+  }
 });
 
 test('changed env, args, and cwd cause real cache misses', async t => {

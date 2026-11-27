@@ -28,7 +28,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   else if (message.method === 'resources/templates/list') reply({ resourceTemplates: [{ name: 'template', uriTemplate: 'fixture://{id}' }] });
   else if (message.method === 'tools/call') {
     if (message.params.name === 'notify') send({ method: 'notifications/tools/list_changed' });
-    const result = { content: [{ type: 'text', text: 'fixture result' }], structuredContent: { pid: process.pid, params: message.params, ephemeralEnv: process.env.CODEX_TOOL_CALL_ID || process.env.codex_tool_call_id, identity: info() } };
+    const result = { content: [{ type: 'text', text: 'fixture result' }], structuredContent: { pid: process.pid, params: message.params, ephemeralEnv: process.env.CODEX_TOOL_CALL_ID || process.env.codex_tool_call_id, identity: info(), launchEnv: Object.fromEntries(['PATH', 'INIT_CWD', 'npm_config_local_prefix', 'npm_package_json', 'NPM_OTHER'].map(name => [name, process.env[name]])) } };
     if (message.params.name === 'identity') result._meta = meta;
     const delay = message.params.arguments?.delay || 0;
     setTimeout(() => reply(result), delay);

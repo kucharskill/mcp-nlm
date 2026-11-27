@@ -55,9 +55,12 @@ metadata are retained; tool results and session IDs are never cached. Paginated
 requests/results and discovery containing session-specific fields bypass caching.
 
 The filename is a SHA-256 hash of an unambiguous encoding of the actual upstream
-command, arguments, effective working directory and full environment sorted by name.
-Environment names are case-insensitive on Windows. `CODEX_TOOL_CALL_ID` is excluded
-only from the hash; the original environment still goes to upstream. No environment
+command, arguments, effective working directory and the remaining environment sorted
+by name. Environment names are case-insensitive on Windows. `CODEX_TOOL_CALL_ID`,
+`PATH`, and all names prefixed with `INIT_` or `NPM_` are excluded only from the hash.
+The `PATH`/prefix exclusions are case-insensitive on every platform. Command
+resolution, the full environment forwarded to upstream, and the original startup
+environment dump remain unchanged. No environment
 values, command arguments or credentials are written into cache records or logs.
 Initialization contracts (protocol, client capabilities and options) are hashed
 separately inside the record so incompatible clients do not reuse a negotiation.

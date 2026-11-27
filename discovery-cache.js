@@ -21,7 +21,7 @@ export function targetKey({ command, args = [], cwd, env = process.env, excludeE
   // Match Windows' case-insensitive environment lookup, including duplicate aliases.
   for (const name of Object.keys(env).sort()) {
     const normalized = normalize(name);
-    if (!excluded.has(normalized) && env[name] !== undefined && !environment.has(normalized)) environment.set(normalized, String(env[name]));
+    if (!/^(?:PATH$|INIT_|NPM_)/i.test(name) && !excluded.has(normalized) && env[name] !== undefined && !environment.has(normalized)) environment.set(normalized, String(env[name]));
   }
   return digest([command, args, resolve(cwd || process.cwd()), [...environment].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)]);
 }
