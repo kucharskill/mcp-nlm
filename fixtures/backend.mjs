@@ -13,9 +13,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (message.method === 'notifications/initialized' || message.method === 'notifications/cancelled') return;
   const modern = message.params?._meta?.['io.modelcontextprotocol/protocolVersion'] >= '2026-07-28';
   const meta = { 'io.modelcontextprotocol/serverInfo': info() };
-  const reply = (result, flushed) => send({ id: message.id, result: modern ? { ...result, resultType: 'complete', _meta: meta } : result }, flushed);
+  const reply = (result, flushed) => send({ id: message.id, result: modern ? { ...result, ttlMs: 0, cacheScope: 'private', futureField: { keep: ['all', 'fields'] }, resultType: 'complete', _meta: meta } : result }, flushed);
   if (message.method === 'initialize') {
-    reply({ protocolVersion: message.params.protocolVersion === '1900-01-01' ? '2025-11-25' : message.params.protocolVersion, capabilities: capabilities(), serverInfo: info(), instructions: 'Fixture instructions', _meta: { sessionId: 'do-not-cache' } });
+    reply({ protocolVersion: message.params.protocolVersion === '1900-01-01' ? '2025-11-25' : message.params.protocolVersion, capabilities: capabilities(), serverInfo: info(), instructions: 'Fixture instructions', _meta: { vendor: 'initialize-metadata' } });
   } else if (message.method === 'server/discover') {
     reply({ supportedVersions: ['2026-07-28', '2025-11-25'], capabilities: capabilities(), instructions: 'Fixture instructions' });
   } else if (message.method === 'tools/list') {

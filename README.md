@@ -66,7 +66,11 @@ Initialization contracts (protocol, client capabilities and options) are hashed
 separately inside the record so incompatible clients do not reuse a negotiation.
 
 Default TTL is **10 minutes**, recorded as `expiresAt` on each successful refresh;
-reading a cache entry does not extend it. `MCP_NLM_CACHE_TTL_MS` overrides the TTL
+reading a cache entry does not extend it. This local TTL is independent of the
+upstream `ttlMs` hint, including `ttlMs: 0`. Complete public discovery results are
+replayed unchanged, including unknown fields, `_meta`, `resultType`, `ttlMs` and
+`cacheScope`. Format 2 rejects older, potentially incomplete records.
+`MCP_NLM_CACHE_TTL_MS` overrides the TTL
 in milliseconds (`0` disables caching). `MCP_NLM_CACHE_EXCLUDE_ENV` adds comma-separated
 environment names to the key exclusions. Use exclusions only for fields that cannot
 affect upstream behavior. Corrupt, old, expired or inaccessible entries are safe misses.
@@ -131,3 +135,10 @@ NotebookLM accounts, paid requests or production operations.
 GitHub Releases publish to npm through Trusted Publishing (OIDC).
 
 License: [MIT](LICENSE).
+
+
+For a local integration check against the installed Codex RMCP client, run
+`node scripts/codex-smoke.mjs <absolute-path-to-codex-executable>` from a source
+checkout. It uses an isolated temporary configuration and synthetic backend,
+checks cold/warm discovery across two client processes, and calls no external
+NotebookLM operations. `npm run check` runs the portable fixture tests.

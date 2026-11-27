@@ -47,38 +47,23 @@ export function identity(result) {
   return object(info) && typeof info.name === 'string' && typeof info.version === 'string' ? digest(info) : null;
 }
 
-// Only discovery results enter the file. Do not retain response/session metadata.
+// Cache the complete public result. Unsafe session/progress state bypasses caching.
 export function cacheable(method, result) {
   if (!object(result)) return null;
-  let value;
   if (method === 'initialize') {
     if (typeof result.protocolVersion !== 'string' || modern(result.protocolVersion) || !identity(result) || !object(result.capabilities)) return null;
-    value = { protocolVersion: result.protocolVersion, capabilities: result.capabilities, serverInfo: result.serverInfo };
-    if (typeof result.instructions === 'string') value.instructions = result.instructions;
   } else if (method === 'server/discover') {
     if (!Array.isArray(result.supportedVersions) || !result.supportedVersions.length || !result.supportedVersions.every(v => typeof v === 'string') || !object(result.capabilities)) return null;
-    value = { supportedVersions: result.supportedVersions, capabilities: result.capabilities };
-    if (typeof result.instructions === 'string') value.instructions = result.instructions;
-    if (object(result._meta)) value._meta = result._meta;
-    if (result.resultType === 'complete') value.resultType = 'complete';
+    if (result.resultType !== 'complete' || !Number.isInteger(result.ttlMs) || result.ttlMs < 0 || !['public', 'private'].includes(result.cacheScope)) return null;
   } else {
     const collection = collections[method];
     if (!collection || !Array.isArray(result[collection]) || result.nextCursor) return null;
     if (!result[collection].every(item => object(item) && (method === 'resources/list' ? typeof item.uri === 'string' : typeof item.name === 'string')
         && (method !== 'tools/list' || (object(item.inputSchema) && item.inputSchema.type === 'object')))) return null;
-    value = { [collection]: result[collection] };
-    if (object(result._meta)) value._meta = result._meta;
-    if (result.resultType === 'complete') value.resultType = 'complete';
   }
-  // Session identifiers are never persisted, even when placed inside vendor metadata.
-  const clean = item => {
-    if (Array.isArray(item)) return item.map(clean);
-    if (!object(item)) return item;
-    return Object.fromEntries(Object.entries(item).filter(([name]) => !/^(?:session(?:[_-]?id)?|mcp-session-id|progressToken|requestId|subscriptionId)$/i.test(name)).map(([name, child]) => [name, clean(child)]));
-  };
-  const cleaned = clean(value);
-  // Avoid changing a schema that legitimately uses a filtered property name.
-  return canonical(cleaned) === canonical(value) ? structuredClone(value) : null;
+  const unsafe = item => Array.isArray(item) ? item.some(unsafe) : object(item)
+    && Object.entries(item).some(([name, child]) => /^(?:session(?:[_-]?id)?|mcp-session-id|progressToken|requestId|subscriptionId)$/i.test(name) || unsafe(child));
+  return unsafe(result) ? null : structuredClone(result);
 }
 
 export class DiscoveryCache {
@@ -93,7 +78,7 @@ export class DiscoveryCache {
     try {
       if ((await stat(this.path)).size > 8 * 1024 * 1024) return null;
       const data = JSON.parse(await readFile(this.path, 'utf8'));
-      if (data.schema !== 1 || data.key !== this.key || typeof data.revision !== 'string'
+      if (data.schema !== 2 || data.key !== this.key || typeof data.revision !== 'string'
           || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(data.revision)
           || !Number.isFinite(data.expiresAt) || !object(data.entries)
           || !(data.identity === null || /^[a-f0-9]{64}$/.test(data.identity))) return null;
@@ -148,11 +133,11 @@ export class DiscoveryCache {
       const now = Date.now();
       const entries = Object.fromEntries(Object.entries(current?.entries || {}).filter(([, entry]) => entry?.expiresAt > now));
       entries[cacheSlot] = { method, savedAt: now, expiresAt: now + this.ttlMs, result: value };
-      return { schema: 1, key: this.key, revision: current?.revision || randomUUID(), identity: backendIdentity || current?.identity || null, expiresAt: now + this.ttlMs, entries };
+      return { schema: 2, key: this.key, revision: current?.revision || randomUUID(), identity: backendIdentity || current?.identity || null, expiresAt: now + this.ttlMs, entries };
     });
   }
 
   async invalidate() {
-    await this.update(() => ({ schema: 1, key: this.key, revision: randomUUID(), identity: null, expiresAt: 0, entries: {} }));
+    await this.update(() => ({ schema: 2, key: this.key, revision: randomUUID(), identity: null, expiresAt: 0, entries: {} }));
   }
 }

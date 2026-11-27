@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DiscoveryCache, targetKey } from '../discovery-cache.js';
+import { DiscoveryCache, targetKey, cacheable } from '../discovery-cache.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const backend = join(root, 'fixtures/backend.mjs');
@@ -99,7 +99,7 @@ test('cold discovery persists complete metadata; a second process initializes an
   for (const method of ['prompts/list', 'resources/list', 'resources/templates/list']) assert.ok((await first.call(method)).result);
   await first.close();
   const second = s.client({}, { CODEX_TOOL_CALL_ID: 'second', CACHE_TEST_SECRET: 'synthetic-secret-never-persist', PATH: 'second-path', INIT_CWD: 'second-cwd', npm_config_local_prefix: 'second-prefix', npm_package_json: 'second-package', NPM_OTHER: 'second-other' });
-  assert.deepEqual((await second.initialize()).result.capabilities, init.result.capabilities);
+  assert.deepEqual((await second.initialize()).result, init.result);
   assert.deepEqual((await second.call('tools/list')).result, list.result);
   for (const method of ['prompts/list', 'resources/list', 'resources/templates/list']) await second.call(method);
   assert.equal((await s.events()).filter(event => event.method === 'spawn').length, 1);
@@ -168,11 +168,11 @@ test('TTL and malformed/old cache safely miss; hits never extend expiresAt', asy
   await writeFile(cachePath, JSON.stringify(expired));
   const third = s.client(); await third.initialize(); await third.call('tools/list'); await third.close();
   assert.equal((await s.events()).filter(event => event.method === 'spawn').length, 2);
-  for (const broken of ['{truncated', JSON.stringify({ schema: 0 }), JSON.stringify({ ...(await s.document()), entries: { broken: true } })]) {
+  for (const broken of ['{truncated', JSON.stringify({ schema: 0 }), JSON.stringify({ ...(await s.document()), schema: 1 }), JSON.stringify({ ...(await s.document()), entries: { broken: true } })]) {
     await writeFile(cachePath, broken);
     const c = s.client(); await c.initialize(); await c.call('tools/list'); await c.close();
   }
-  assert.equal((await s.events()).filter(event => event.method === 'spawn').length, 5);
+  assert.equal((await s.events()).filter(event => event.method === 'spawn').length, 6);
 });
 
 test('warm hits and keep-alives do not reset idle; real operations use long idle', async t => {
@@ -321,4 +321,52 @@ test('concurrent writers leave valid atomic JSON and invalidated generations can
   await cache.put('stale', 'tools/list', result, lease.revision, null);
   assert.equal((await cache.read('stale', 'tools/list')).result, null);
   assert.equal((await readdir(cache.directory)).some(name => name.endsWith('.tmp') || name.endsWith('.lock')), false);
+});
+
+
+test('complete modern discovery results survive replicas with an independent local TTL', async t => {
+  const s = await scenario(t);
+  const first = s.client();
+  const results = new Map();
+  for (const method of ['server/discover', 'tools/list', 'prompts/list', 'resources/list', 'resources/templates/list']) {
+    const result = (await first.call(method, { _meta: modernMeta })).result;
+    assert.equal(result.ttlMs, 0);
+    assert.equal(result.cacheScope, 'private');
+    assert.deepEqual(result.futureField, { keep: ['all', 'fields'] });
+    results.set(method, result);
+  }
+  const document = await s.document();
+  assert.equal(document.schema, 2);
+  assert.ok(Object.values(document.entries).every(e => e.expiresAt - e.savedAt === 600_000));
+  await first.close();
+  const second = s.client();
+  for (const [method, expected] of results) assert.deepEqual((await second.call(method, { _meta: modernMeta })).result, expected);
+  assert.equal((await s.events()).filter(e => e.method === 'spawn').length, 1);
+  assert.equal((await s.document()).expiresAt, document.expiresAt);
+});
+
+test('session and progress state bypasses caching without editing public results', () => {
+  const result = { tools: [{ name: 'fixture', inputSchema: { type: 'object' } }], ttlMs: 0, cacheScope: 'private', resultType: 'complete', _meta: { vendor: 'retained' }, futureField: true };
+  assert.deepEqual(cacheable('tools/list', result), result);
+  for (const name of ['sessionId', 'progressToken', 'requestId', 'subscriptionId']) {
+    const unsafe = { ...result, _meta: { [name]: 'ephemeral' } };
+    const original = structuredClone(unsafe);
+    assert.equal(cacheable('tools/list', unsafe), null);
+    assert.deepEqual(unsafe, original);
+  }
+});
+
+
+test('upstream zero TTL does not shorten the ten-minute local lifetime', async t => {
+  const s = await scenario(t);
+  const cache = new DiscoveryCache({ command: 'fixture', cwd: root, env: {} }, { directory: join(s.directory, 'ttl-cache') });
+  const result = { tools: [], ttlMs: 0, cacheScope: 'private', resultType: 'complete', _meta: { vendor: true }, futureField: 'preserved' };
+  await cache.put('tools', 'tools/list', result, null);
+  const { savedAt, expiresAt } = (await cache.document()).entries.tools;
+  assert.equal(expiresAt, savedAt + 600_000);
+  t.mock.method(Date, 'now', () => savedAt + 599_999);
+  assert.deepEqual((await cache.read('tools', 'tools/list')).result, result);
+  assert.equal((await cache.document()).entries.tools.expiresAt, expiresAt);
+  t.mock.method(Date, 'now', () => expiresAt);
+  assert.equal((await cache.read('tools', 'tools/list')).result, null);
 });
