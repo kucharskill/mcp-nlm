@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DiscoveryCache, targetKey } from '../discovery-cache.js';
@@ -72,7 +72,10 @@ async function scenario(t, defaults = {}) {
     return result;
   }
   const events = async () => (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const state = value => writeFile(statePath, JSON.stringify(value));
+  const state = async value => {
+    await writeFile(statePath + '.next', JSON.stringify(value));
+    await rename(statePath + '.next', statePath);
+  };
   const document = async () => {
     const files = (await readdir(join(directory, 'cache'))).filter(name => name.endsWith('.json'));
     return JSON.parse(await readFile(join(directory, 'cache', files[0]), 'utf8'));
@@ -261,7 +264,9 @@ test('an unavailable cache fails open and a backend exit after a result does not
   const c = s.client({ directory: blocked });
   assert.ok((await c.initialize()).result);
   await s.state({ version: '1', exitAfterList: true });
-  assert.equal((await c.call('tools/list')).result.tools[0].name, 'fixture');
+  const listed = await c.call('tools/list');
+  assert.ok(listed.result, JSON.stringify(listed));
+  assert.equal(listed.result.tools[0].name, 'fixture');
   await pause(100);
   assert.equal(c.messages.filter(message => message.id === 2).length, 1);
   const second = s.client();
