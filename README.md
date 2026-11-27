@@ -52,7 +52,9 @@ answer legacy `initialize`, modern `server/discover`, and complete catalog reque
 (`tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`) without
 starting Python or uvx. Descriptions, schemas, annotations, instructions and discovery
 metadata are retained; tool results and session IDs are never cached. Paginated
-requests/results and discovery containing session-specific fields bypass caching.
+requests/results and discovery containing session-specific metadata bypass caching.
+Field names inside tool input/output JSON Schemas are definitions, not live session
+state, and are preserved with the complete catalog.
 
 The filename is a SHA-256 hash of an unambiguous encoding of the actual upstream
 command, arguments, effective working directory and the remaining environment sorted

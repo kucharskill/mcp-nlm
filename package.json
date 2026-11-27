@@ -1,6 +1,6 @@
 {
   "name": "mcp-nlm",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "On-demand stdio proxy for the latest NotebookLM MCP server.",
   "type": "module",
   "license": "MIT",

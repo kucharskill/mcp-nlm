@@ -108,7 +108,7 @@ test('cold discovery persists complete metadata; a second process initializes an
   assert.equal(text.includes('synthetic-secret-never-persist'), false);
   assert.equal(text.includes('CODEX_TOOL_CALL_ID'), false);
   assert.equal(text.includes('do-not-cache'), false);
-  assert.equal(text.includes('sessionId'), false);
+  assert.equal(list.result.tools[0].inputSchema.properties.sessionId.type, 'string');
   assert.equal(list.result.tools[0]._meta.vendor.tags[0], 'fixture');
   const operation = await second.call('tools/call', { name: 'read', arguments: { value: 'untouched' } });
   assert.equal(operation.result.structuredContent.ephemeralEnv, 'second');
@@ -369,4 +369,17 @@ test('upstream zero TTL does not shorten the ten-minute local lifetime', async t
   assert.equal((await cache.document()).entries.tools.expiresAt, expiresAt);
   t.mock.method(Date, 'now', () => expiresAt);
   assert.equal((await cache.read('tools', 'tools/list')).result, null);
+});
+
+
+test('schema field names are preserved while live descriptor metadata bypasses caching', () => {
+  const fields = Object.fromEntries(['sessionId', 'requestId', 'progressToken', 'subscriptionId'].map(name => [name, { type: 'string' }]));
+  const tool = { name: 'fixture', inputSchema: { type: 'object', properties: fields }, outputSchema: { type: 'object', properties: fields }, _meta: { vendor: true } };
+  const result = { tools: [tool], ttlMs: 0, cacheScope: 'private', resultType: 'complete' };
+  assert.deepEqual(cacheable('tools/list', result), result);
+  for (const key of Object.keys(fields)) {
+    const unsafe = { ...result, tools: [{ ...tool, _meta: { [key]: 'actual-session-state' } }] };
+    assert.equal(cacheable('tools/list', unsafe), null);
+  }
+  assert.equal(cacheable('tools/list', { ...result, _meta: { sessionId: 'actual-session-state' } }), null);
 });

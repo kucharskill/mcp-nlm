@@ -20,7 +20,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     reply({ supportedVersions: ['2026-07-28', '2025-11-25'], capabilities: capabilities(), instructions: 'Fixture instructions' });
   } else if (message.method === 'tools/list') {
     if (state().notifyDuringList) send({ method: 'notifications/tools/list_changed' });
-    const result = { tools: [{ name: state().tool || 'fixture', description: 'Full description', inputSchema: { type: 'object', properties: { value: { type: 'string' } } }, outputSchema: { type: 'object' }, annotations: { readOnlyHint: true }, _meta: { vendor: { tags: ['fixture'] } } }] };
+    const result = { tools: [{ name: state().tool || 'fixture', description: 'Full description', inputSchema: { type: 'object', properties: { value: { type: 'string' }, sessionId: { type: 'string' }, requestId: { type: 'string' }, progressToken: { type: 'string' } } }, outputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, subscriptionId: { type: 'string' } } }, annotations: { readOnlyHint: true }, _meta: { vendor: { tags: ['fixture'] } } }] };
     if (message.params?.cursor) result.nextCursor = 'opaque-session-cursor';
     reply(result, state().exitAfterList ? () => process.exit(0) : undefined);
   } else if (message.method === 'prompts/list') reply({ prompts: [{ name: 'prompt', description: 'Prompt description', arguments: [{ name: 'topic' }] }] });

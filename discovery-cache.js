@@ -63,7 +63,15 @@ export function cacheable(method, result) {
   }
   const unsafe = item => Array.isArray(item) ? item.some(unsafe) : object(item)
     && Object.entries(item).some(([name, child]) => /^(?:session(?:[_-]?id)?|mcp-session-id|progressToken|requestId|subscriptionId)$/i.test(name) || unsafe(child));
-  return unsafe(result) ? null : structuredClone(result);
+  if (method === 'tools/list') {
+    const { tools, ...metadata } = result;
+    if (unsafe(metadata) || tools.some(tool => {
+      // Schemas describe data fields, not live transport/session state.
+      const { inputSchema, outputSchema, ...descriptor } = tool;
+      return unsafe(descriptor);
+    })) return null;
+  } else if (unsafe(result)) return null;
+  return structuredClone(result);
 }
 
 export class DiscoveryCache {
