@@ -28,6 +28,10 @@ const proxy = new StdioProxy({
   args: ['--from', 'notebooklm-mcp-cli@latest', 'notebooklm-mcp'],
   cwd,
   env: { ...process.env, NOTEBOOKLM_MCP_CLI_PATH: data },
+  cache: {
+    ttlMs: process.env.MCP_NLM_CACHE_TTL_MS === undefined ? 600_000 : Number(process.env.MCP_NLM_CACHE_TTL_MS),
+    excludeEnv: (process.env.MCP_NLM_CACHE_EXCLUDE_ENV || '').split(',').map(name => name.trim()).filter(Boolean),
+  },
 });
 proxy.connect(process.stdin, process.stdout);
 for (const signal of ['SIGINT', 'SIGTERM']) {

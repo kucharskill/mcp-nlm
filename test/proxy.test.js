@@ -56,7 +56,7 @@ function setup(t, options = {}) {
       messages.push(JSON.parse(buffer.slice(0, n))); buffer = buffer.slice(n + 1);
     }
   });
-  const proxy = new StdioProxy({ command: process.execPath, args: ['--input-type=module', '-e', fixture], discoveryMs: 80, idleMs: 400, ...options });
+  const proxy = new StdioProxy({ command: process.execPath, args: ['--input-type=module', '-e', fixture], discoveryMs: 80, idleMs: 400, cache: false, ...options });
   proxy.connect(input, output);
   t.after(() => proxy.close());
   const send = m => input.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');

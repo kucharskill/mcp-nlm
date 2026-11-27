@@ -19,9 +19,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
-        with:
-          python-version: '3.12'
       - name: Verify version and tag
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -29,17 +26,13 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run release:prepare
       - name: Verify distribution
-        shell: bash
-        run: |
-          archive="$(pwd)/tmp/releases/mcp-nlm-$(node -p 'require("./package.json").version').tgz"
-          npx -y --package "$archive" -- mcp-nlm --version
-          node scripts/smoke.mjs npx -y --package "$archive" -- mcp-nlm
+        run: node scripts/packed-smoke.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: npm-distribution
           path: |
-            tmp/releases/*.tgz
-            tmp/releases/package-manifest.json
+            .tmp/releases/*.tgz
+            .tmp/releases/package-manifest.json
       - name: Publish to npm using OIDC
         env:
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}

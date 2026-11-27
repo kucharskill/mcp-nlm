@@ -18,15 +18,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: ${{ matrix.node }}
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
-        with:
-          python-version: '3.12'
       - run: npm ci --ignore-scripts
       - run: npm run release:prepare
-      - name: Verify packed CLI and MCP outside checkout
-        shell: bash
-        run: |
-          archive="$(pwd)/tmp/releases/mcp-nlm-$(node -p 'require("./package.json").version').tgz"
-          npx -y --package "$archive" -- mcp-nlm --version
-          npx -y --package "$archive" -- mcp-nlm --help
-          node scripts/smoke.mjs npx -y --package "$archive" -- mcp-nlm
+      - name: Verify packed CLI and MCP with local fixtures
+        run: node scripts/packed-smoke.mjs

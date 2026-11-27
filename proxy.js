@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
+import { DiscoveryCache, canonical, contract, discoveryMethods, identity, modern, slot } from './discovery-cache.js';
 
-const discovery = new Set(['initialize', 'tools/list']);
 const key = id => JSON.stringify(id);
 
 function authFailure(result) {
@@ -17,8 +17,11 @@ function authFailure(result) {
 }
 
 export class StdioProxy {
-  constructor({ command, args = [], cwd, env = process.env, discoveryMs = 60_000, idleMs = 1_800_000, startupMs = 60_000 }) {
+  constructor({ command, args = [], cwd, env = process.env, discoveryMs = 60_000, idleMs = 1_800_000, startupMs = 60_000, cache = {} }) {
     Object.assign(this, { command, args, cwd, env, discoveryMs, idleMs, startupMs });
+    this.args = [...args];
+    this.cwd = cwd || process.cwd();
+    this.env = { ...env };
     this.pending = new Set();
     this.requests = new Map();
     this.refreshes = new Map();
@@ -27,13 +30,18 @@ export class StdioProxy {
     this.delay = discoveryMs;
     this.queue = Promise.resolve();
     this.closed = false;
+    this.cache = cache === false ? null : new DiscoveryCache({ command, args: this.args, cwd: this.cwd, env: this.env }, cache);
+    this.cacheRequests = new Map();
+    this.cancelled = new Set();
+    this.upstreamQueue = Promise.resolve();
   }
 
   connect(input, output) {
     this.output = output;
     const lines = createInterface({ input, crlfDelay: Infinity });
     lines.on('line', line => {
-      clearTimeout(this.timer);
+      // Keep-alive must not queue behind startup, touch idle, or wake upstream.
+      try { if (this.localPing(JSON.parse(line))) return; } catch {}
       this.queued = (this.queued || 0) + 1;
       this.queue = this.queue.then(() => this.receive(line)).catch(error => {
         process.stderr.write(`mcp-nlm: ${error.message}\n`);
@@ -45,24 +53,64 @@ export class StdioProxy {
   emit(message) { this.output.write(JSON.stringify(message) + '\n'); }
   write(message) { this.child.stdin.write(JSON.stringify(message) + '\n'); }
 
+  localPing(message) {
+    if (message?.method !== 'ping') return false;
+    const version = message.params?._meta?.['io.modelcontextprotocol/protocolVersion'] || this.protocolVersion;
+    if (Object.hasOwn(message, 'id')) this.emit(modern(version)
+      ? { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'ping is not part of modern MCP' } }
+      : { jsonrpc: '2.0', id: message.id, result: {} });
+    return true;
+  }
+
   async receive(line) {
     let message;
     try { message = JSON.parse(line); }
     catch { this.emit({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); return; }
     if (this.closed) return;
     const request = message.method && Object.hasOwn(message, 'id');
+    const version = message.params?._meta?.['io.modelcontextprotocol/protocolVersion'] || this.protocolVersion;
+    if (this.localPing(message)) return;
     if (request) {
-      this.delay = discovery.has(message.method) ? this.discoveryMs : this.idleMs;
-      if (message.method === 'initialize') this.initialize = message;
+      if (message.method === 'initialize') {
+        this.initialize = message;
+        this.sessionContract = contract(message.params, true);
+      }
+      if (modern(version)) this.protocolVersion = version;
+      if (this.cache && discoveryMethods.has(message.method)) {
+        const context = message.method === 'initialize' ? this.sessionContract
+          : modern(version) ? contract(message.params) : this.sessionContract;
+        const cacheSlot = slot(message.method, context, message.params);
+        if (cacheSlot && context) {
+          const cached = await this.cache.read(cacheSlot, message.method);
+          if (cached.result) {
+            if (message.method === 'initialize') {
+              this.initializeResult = cached.result;
+              this.protocolVersion = cached.result.protocolVersion;
+            }
+            this.backendIdentity = cached.identity || this.backendIdentity;
+            this.emit({ jsonrpc: '2.0', id: message.id, result: cached.result });
+            return;
+          }
+          this.cacheRequests.set(key(message.id), { cacheSlot, revision: cached.revision });
+          this.backendIdentity ||= cached.identity;
+        }
+      }
     }
     if (message.method === 'notifications/initialized') {
       this.initialized = true;
       if (this.child) this.write(message);
       return;
     }
+    if (message.method === 'notifications/cancelled' && modern(version)) this.cancel(message.params?.requestId);
     // A late notification must not restart an idle server (e.g. cancellation).
     if (!request && !this.child) return;
     try {
+      if (request) {
+        this.cancelled.delete(key(message.id));
+        this.delay = discoveryMethods.has(message.method) ? this.discoveryMs : this.idleMs;
+        this.idleDeadline = null;
+        clearTimeout(this.timer);
+      }
       await this.ensureStarted(message.method === 'initialize');
       if (this.closed) return;
       if (request) {
@@ -72,7 +120,10 @@ export class StdioProxy {
       else if (Object.hasOwn(message, 'id')) this.serverPending.delete(key(message.id));
       this.write(message);
     } catch (error) {
-      if (request) this.emit({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: error.message } });
+      if (request) {
+        this.cacheRequests.delete(key(message.id));
+        this.emit({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: error.message } });
+      }
       else throw error;
     }
   }
@@ -87,13 +138,21 @@ export class StdioProxy {
     child.stderr.pipe(process.stderr, { end: false });
     child.stdin.on('error', () => {});
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', line => {
-      try { this.upstream(JSON.parse(line)); }
+      try {
+        const message = JSON.parse(line);
+        this.upstreamQueue = this.upstreamQueue.then(() => this.upstream(message)).catch(error => {
+          process.stderr.write(`mcp-nlm: upstream handling failed: ${error.message}\n`);
+        });
+      }
       catch (error) { process.stderr.write(`mcp-nlm: invalid upstream message: ${error.message}\n`); }
     });
     child.on('error', error => this.lost(child, error.message));
-    child.on('exit', (code, signal) => this.lost(child, `Upstream exited (${signal || code})`));
+    // Drain async cache writes/responses before reporting an upstream exit.
+    child.on('close', (code, signal) => {
+      void this.upstreamQueue.then(() => this.lost(child, `Upstream exited (${signal || code})`));
+    });
     await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
-    if (!firstInitialize && this.initialize) {
+    if (!firstInitialize && this.initialize && !modern(this.protocolVersion)) {
       const id = `proxy-initialize-${randomUUID()}`;
       await new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -108,7 +167,38 @@ export class StdioProxy {
     }
   }
 
-  upstream(message) {
+  async observe(result) {
+    const next = identity(result);
+    const changed = !!(next && this.backendIdentity && next !== this.backendIdentity);
+    if (changed) {
+      await this.cache?.invalidate();
+    }
+    if (next) this.backendIdentity = next;
+    return changed;
+  }
+
+  async remember(request, result, lease, changed = false) {
+    if (request.method === 'initialize') {
+      this.protocolVersion = result.protocolVersion;
+      this.initializeResult = result;
+    }
+    if (lease && changed && ['initialize', 'server/discover'].includes(request.method)) {
+      lease = { ...lease, revision: (await this.cache.read(lease.cacheSlot, request.method)).revision };
+    }
+    if (lease) await this.cache?.put(lease.cacheSlot, request.method, result, lease.revision, this.backendIdentity);
+  }
+
+  async upstream(message) {
+    if (message.method === 'ping') {
+      if (Object.hasOwn(message, 'id')) this.write(modern(this.protocolVersion)
+        ? { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'ping is not part of modern MCP' } }
+        : { jsonrpc: '2.0', id: message.id, result: {} });
+      return;
+    }
+    if (!message.method && this.cancelled.has(key(message.id))) { this.cancelled.delete(key(message.id)); return; }
+    if (message.method === 'notifications/cancelled' && modern(this.protocolVersion)) this.cancel(message.params?.requestId);
+    if (/^notifications\/(?:tools|prompts|resources)\/list_changed$/.test(message.method || '')) await this.cache?.invalidate();
+    const changed = await this.observe(message.result || message.params);
     if (!message.method && this.internalIds.has(key(message.id))) {
       this.internalIds.delete(key(message.id));
       this.refreshes.get(key(message.id))?.(message);
@@ -116,12 +206,27 @@ export class StdioProxy {
     }
     if (this.bootstrap && message.id === this.bootstrap.id && !message.method) {
       const { resolve, reject, timer } = this.bootstrap;
+      if (message.error) reject(new Error(message.error.message));
+      else {
+        const previous = this.initializeResult;
+        if (previous && (previous.protocolVersion !== message.result?.protocolVersion || canonical(previous.capabilities) !== canonical(message.result?.capabilities))) {
+          await this.cache?.invalidate();
+          reject(new Error('Upstream protocol or capabilities changed; reconnect the MCP client'));
+          void this.stop();
+        } else {
+          const cacheSlot = slot('initialize', this.sessionContract, this.initialize.params);
+          const cached = await this.cache?.read(cacheSlot, 'initialize');
+          await this.remember(this.initialize, message.result, cached && { cacheSlot, revision: cached.revision });
+          resolve();
+        }
+      }
       clearTimeout(timer);
       this.bootstrap = null;
-      if (message.error) reject(new Error(message.error.message)); else resolve();
       return;
     }
     const request = this.requests.get(key(message.id));
+    if (request && !message.method && message.result) await this.remember(request, message.result, this.cacheRequests.get(key(message.id)), changed);
+    if (!message.method) this.cacheRequests.delete(key(message.id));
     if (!message.method && request?.method === 'tools/call'
         && request.params?.name !== 'refresh_auth' && authFailure(message.result)) {
       void this.recover(message, request);
@@ -133,6 +238,14 @@ export class StdioProxy {
     }
     this.emit(message);
     this.arm();
+  }
+
+  cancel(id) {
+    if (!this.pending.has(key(id))) return;
+    this.pending.delete(key(id));
+    this.requests.delete(key(id));
+    this.cacheRequests.delete(key(id));
+    this.cancelled.add(key(id));
   }
 
   async recover(message, request) {
@@ -153,6 +266,7 @@ export class StdioProxy {
         try {
           this.write({ jsonrpc: '2.0', id, method: 'tools/call', params: {
             name: 'refresh_auth', arguments: group ? { profile: group } : {},
+            ...(request.params?._meta ? { _meta: request.params._meta } : {}),
           } });
         } catch { finish(null); }
       }).finally(() => this.recoveries.delete(group));
@@ -187,15 +301,20 @@ export class StdioProxy {
     for (const id of this.pending) this.emit({ jsonrpc: '2.0', id: JSON.parse(id), error: { code: -32603, message: reason } });
     this.pending.clear();
     this.requests.clear();
+    this.cacheRequests.clear();
     for (const finish of this.refreshes.values()) finish(null);
     this.internalIds.clear();
     this.serverPending.clear();
+    this.cancelled.clear();
   }
 
   arm() {
     clearTimeout(this.timer);
     if (!this.closed && this.child && !this.pending.size && !this.serverPending.size && !this.queued && !this.bootstrap) {
-      this.timer = setTimeout(() => { void this.stop(); }, this.delay);
+      this.idleDeadline ??= Date.now() + this.delay;
+      this.timer = setTimeout(() => {
+        if (!this.pending.size && !this.serverPending.size && !this.queued && !this.bootstrap) void this.stop();
+      }, Math.max(0, this.idleDeadline - Date.now()));
       this.timer.unref();
     }
   }
@@ -213,7 +332,10 @@ export class StdioProxy {
         } else child.kill('SIGKILL');
       };
       const timer = setTimeout(kill, 3000);
-      child.once('exit', () => { clearTimeout(timer); resolve(); });
+      child.once('close', () => {
+        clearTimeout(timer);
+        void this.upstreamQueue.then(resolve);
+      });
       child.stdin.end();
     });
     try { await this.stopping; } finally { this.stopping = null; }

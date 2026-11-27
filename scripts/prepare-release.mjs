@@ -9,7 +9,7 @@ const metadata = JSON.parse(await readFile('package.json', 'utf8'));
 const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
 assert.equal(lock.version, metadata.version);
 assert.equal(lock.packages[''].version, metadata.version);
-const directory = resolve('tmp/releases');
+const directory = resolve('.tmp/releases');
 await mkdir(directory, { recursive: true });
 const packed = spawnSync(process.execPath, [process.env.npm_execpath, 'pack', '--json', '--pack-destination', directory], { encoding: 'utf8' });
 if (packed.status !== 0) throw new Error(packed.stderr);
@@ -27,7 +27,7 @@ for (let offset = 0; offset + 512 <= tar.length && tar[offset];) {
   files.push(name);
   offset += 512 + Math.ceil(size / 512) * 512;
 }
-assert.deepEqual(files.sort(), ['package/LICENSE', 'package/README.md', 'package/cli.js', 'package/package.json', 'package/proxy.js'].sort());
+assert.deepEqual(files.sort(), ['package/LICENSE', 'package/README.md', 'package/cli.js', 'package/discovery-cache.js', 'package/package.json', 'package/proxy.js'].sort());
 const integrity = 'sha512-' + createHash('sha512').update(archive).digest('base64');
 assert.equal(integrity, report.integrity);
 const manifest = { name: metadata.name, version: metadata.version, archive: report.filename, integrity, files };
